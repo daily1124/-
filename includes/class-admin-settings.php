@@ -1,6 +1,6 @@
 <?php
 /**
- * 管理設定頁面 - 完整修正版（支援分開的關鍵字設定）
+ * 管理設定頁面 - 修正版（移除載入特效）
  */
 class AICG_Admin_Settings {
     
@@ -16,6 +16,8 @@ class AICG_Admin_Settings {
     private function __construct() {
         add_action('admin_init', array($this, 'register_settings'));
         add_action('admin_menu', array($this, 'add_settings_page'));
+        // 處理AJAX儲存
+        add_action('wp_ajax_aicg_save_settings', array($this, 'ajax_save_settings'));
     }
     
     /**
@@ -37,11 +39,11 @@ class AICG_Admin_Settings {
      */
     public function register_settings() {
         // API 設定群組
-        register_setting('aicg_api_settings', 'aicg_openai_api_key');
-        register_setting('aicg_api_settings', 'aicg_openai_model');
-        register_setting('aicg_api_settings', 'aicg_volcengine_access_key_id');
-        register_setting('aicg_api_settings', 'aicg_volcengine_secret_access_key');
-        register_setting('aicg_api_settings', 'aicg_unsplash_access_key');
+        register_setting('aicg_api_settings', 'aicg_openai_api_key', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting('aicg_api_settings', 'aicg_openai_model', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting('aicg_api_settings', 'aicg_volcengine_access_key_id', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting('aicg_api_settings', 'aicg_volcengine_secret_access_key', array('sanitize_callback' => 'sanitize_text_field'));
+        register_setting('aicg_api_settings', 'aicg_unsplash_access_key', array('sanitize_callback' => 'sanitize_text_field'));
         
         // 發布設定群組
         register_setting('aicg_publish_settings', 'aicg_auto_publish_taiwan');
@@ -75,18 +77,73 @@ class AICG_Admin_Settings {
     }
     
     /**
+     * AJAX 儲存設定
+     */
+    public function ajax_save_settings() {
+        check_ajax_referer('aicg_ajax_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => '權限不足'));
+            return;
+        }
+        
+        $tab = isset($_POST['tab']) ? sanitize_text_field($_POST['tab']) : 'api';
+        
+        switch ($tab) {
+            case 'api':
+                update_option('aicg_openai_api_key', sanitize_text_field($_POST['aicg_openai_api_key'] ?? ''));
+                update_option('aicg_openai_model', sanitize_text_field($_POST['aicg_openai_model'] ?? 'gpt-3.5-turbo'));
+                update_option('aicg_volcengine_access_key_id', sanitize_text_field($_POST['aicg_volcengine_access_key_id'] ?? ''));
+                update_option('aicg_volcengine_secret_access_key', sanitize_text_field($_POST['aicg_volcengine_secret_access_key'] ?? ''));
+                update_option('aicg_unsplash_access_key', sanitize_text_field($_POST['aicg_unsplash_access_key'] ?? ''));
+                break;
+                
+            case 'publish':
+                update_option('aicg_auto_publish_taiwan', isset($_POST['aicg_auto_publish_taiwan']) ? 1 : 0);
+                update_option('aicg_auto_publish_casino', isset($_POST['aicg_auto_publish_casino']) ? 1 : 0);
+                update_option('aicg_post_frequency_taiwan', sanitize_text_field($_POST['aicg_post_frequency_taiwan'] ?? 'daily'));
+                update_option('aicg_post_frequency_casino', sanitize_text_field($_POST['aicg_post_frequency_casino'] ?? 'daily'));
+                update_option('aicg_publish_time_taiwan', sanitize_text_field($_POST['aicg_publish_time_taiwan'] ?? '09:00'));
+                update_option('aicg_publish_time_casino', sanitize_text_field($_POST['aicg_publish_time_casino'] ?? '09:00'));
+                update_option('aicg_posts_per_batch_taiwan', intval($_POST['aicg_posts_per_batch_taiwan'] ?? 3));
+                update_option('aicg_posts_per_batch_casino', intval($_POST['aicg_posts_per_batch_casino'] ?? 3));
+                update_option('aicg_default_category', intval($_POST['aicg_default_category'] ?? 1));
+                update_option('aicg_default_author', intval($_POST['aicg_default_author'] ?? 1));
+                update_option('aicg_post_status', sanitize_text_field($_POST['aicg_post_status'] ?? 'publish'));
+                break;
+                
+            case 'content':
+                update_option('aicg_min_word_count', intval($_POST['aicg_min_word_count'] ?? 1000));
+                update_option('aicg_max_word_count', intval($_POST['aicg_max_word_count'] ?? 2000));
+                update_option('aicg_include_images', isset($_POST['aicg_include_images']) ? 1 : 0);
+                update_option('aicg_image_source', sanitize_text_field($_POST['aicg_image_source'] ?? 'volcengine'));
+                update_option('aicg_content_tone', sanitize_text_field($_POST['aicg_content_tone'] ?? 'professional'));
+                update_option('aicg_content_style', sanitize_text_field($_POST['aicg_content_style'] ?? 'informative'));
+                break;
+                
+            case 'keywords':
+                update_option('aicg_keyword_source_url', esc_url_raw($_POST['aicg_keyword_source_url'] ?? ''));
+                update_option('aicg_casino_keyword_source_url', esc_url_raw($_POST['aicg_casino_keyword_source_url'] ?? ''));
+                update_option('aicg_taiwan_keywords_per_post', intval($_POST['aicg_taiwan_keywords_per_post'] ?? 2));
+                update_option('aicg_casino_keywords_per_post', intval($_POST['aicg_casino_keywords_per_post'] ?? 1));
+                update_option('aicg_taiwan_keyword_density', floatval($_POST['aicg_taiwan_keyword_density'] ?? 2));
+                update_option('aicg_casino_keyword_density', floatval($_POST['aicg_casino_keyword_density'] ?? 1.5));
+                update_option('aicg_keyword_preference', sanitize_text_field($_POST['aicg_keyword_preference'] ?? 'mixed'));
+                break;
+        }
+        
+        wp_send_json_success(array('message' => '設定已儲存'));
+    }
+    
+    /**
      * 渲染設定頁面
      */
     public function render_settings_page() {
-        // 檢查是否有提交
-        if (isset($_GET['settings-updated']) && $_GET['settings-updated']) {
-            add_settings_error('aicg_messages', 'aicg_message', '設定已儲存', 'updated');
-        }
         ?>
         <div class="wrap">
             <h1>AI 內容生成器設定</h1>
             
-            <?php settings_errors('aicg_messages'); ?>
+            <div id="aicg-settings-messages"></div>
             
             <h2 class="nav-tab-wrapper">
                 <a href="#api" class="nav-tab nav-tab-active" data-tab="api">API 設定</a>
@@ -95,10 +152,11 @@ class AICG_Admin_Settings {
                 <a href="#keywords" class="nav-tab" data-tab="keywords">關鍵字設定</a>
             </h2>
             
-            <form method="post" action="options.php" id="aicg-settings-form">
+            <!-- 重要：移除 form 的 action="options.php"，改用 JavaScript 處理 -->
+            <form method="post" id="aicg-settings-form" onsubmit="return false;">
                 <!-- API 設定 -->
                 <div id="api-settings" class="settings-section active">
-                    <?php settings_fields('aicg_api_settings'); ?>
+                    <input type="hidden" name="current_tab" value="api">
                     
                     <table class="form-table">
                         <tr>
@@ -194,12 +252,14 @@ class AICG_Admin_Settings {
                         </tr>
                     </table>
                     
-                    <?php submit_button('儲存 API 設定'); ?>
+                    <p class="submit">
+                        <button type="button" class="button-primary aicg-save-settings" data-tab="api">儲存 API 設定</button>
+                    </p>
                 </div>
                 
                 <!-- 發布設定 -->
                 <div id="publish-settings" class="settings-section" style="display:none;">
-                    <?php settings_fields('aicg_publish_settings'); ?>
+                    <input type="hidden" name="current_tab" value="publish">
                     
                     <table class="form-table">
                         <tr>
@@ -387,12 +447,14 @@ class AICG_Admin_Settings {
                         </tr>
                     </table>
                     
-                    <?php submit_button('儲存發布設定'); ?>
+                    <p class="submit">
+                        <button type="button" class="button-primary aicg-save-settings" data-tab="publish">儲存發布設定</button>
+                    </p>
                 </div>
                 
                 <!-- 內容設定 -->
                 <div id="content-settings" class="settings-section" style="display:none;">
-                    <?php settings_fields('aicg_content_settings'); ?>
+                    <input type="hidden" name="current_tab" value="content">
                     
                     <table class="form-table">
                         <tr>
@@ -481,12 +543,14 @@ class AICG_Admin_Settings {
                         </tr>
                     </table>
                     
-                    <?php submit_button('儲存內容設定'); ?>
+                    <p class="submit">
+                        <button type="button" class="button-primary aicg-save-settings" data-tab="content">儲存內容設定</button>
+                    </p>
                 </div>
                 
                 <!-- 關鍵字設定 -->
                 <div id="keyword-settings" class="settings-section" style="display:none;">
-                    <?php settings_fields('aicg_keyword_settings'); ?>
+                    <input type="hidden" name="current_tab" value="keywords">
                     
                     <table class="form-table">
                         <tr>
@@ -608,7 +672,9 @@ class AICG_Admin_Settings {
                         </tr>
                     </table>
                     
-                    <?php submit_button('儲存關鍵字設定'); ?>
+                    <p class="submit">
+                        <button type="button" class="button-primary aicg-save-settings" data-tab="keywords">儲存關鍵字設定</button>
+                    </p>
                 </div>
             </form>
         </div>
@@ -626,12 +692,74 @@ class AICG_Admin_Settings {
                 
                 var target = $(this).data('tab');
                 $('#' + target + '-settings').addClass('active').show();
+            });
+            
+            // AJAX 儲存設定 - 防止表單提交
+            $('.aicg-save-settings').on('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
                 
-                // 更新表單的 action 屬性
-                var form = $('#aicg-settings-form');
-                form.find('input[name="option_page"]').remove();
-                form.find('input[name="action"]').remove();
-                form.find('input[name="_wpnonce"]').remove();
+                var button = $(this);
+                var tab = button.data('tab');
+                var originalText = button.text();
+                var section = $('#' + tab + '-settings');
+                
+                // 收集表單資料
+                var formData = new FormData();
+                formData.append('action', 'aicg_save_settings');
+                formData.append('nonce', aicg_ajax.nonce);
+                formData.append('tab', tab);
+                
+                // 收集該區塊的所有輸入
+                section.find('input, select, textarea').each(function() {
+                    var $input = $(this);
+                    var name = $input.attr('name');
+                    var type = $input.attr('type');
+                    
+                    if (name) {
+                        if (type === 'checkbox') {
+                            if ($input.is(':checked')) {
+                                formData.append(name, $input.val());
+                            }
+                        } else {
+                            formData.append(name, $input.val());
+                        }
+                    }
+                });
+                
+                // 顯示載入狀態
+                button.text('儲存中...').prop('disabled', true);
+                
+                // 發送 AJAX 請求
+                $.ajax({
+                    url: aicg_ajax.ajax_url,
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(response) {
+                        if (response.success) {
+                            // 顯示成功訊息
+                            $('#aicg-settings-messages').html(
+                                '<div class="notice notice-success is-dismissible"><p>' + 
+                                response.data.message + 
+                                '</p></div>'
+                            );
+                            
+                            // 滾動到頂部看訊息
+                            $('html, body').animate({ scrollTop: 0 }, 300);
+                        } else {
+                            alert('錯誤: ' + (response.data.message || '儲存失敗'));
+                        }
+                    },
+                    error: function() {
+                        alert('儲存失敗，請稍後再試');
+                    },
+                    complete: function() {
+                        // 恢復按鈕狀態
+                        button.text(originalText).prop('disabled', false);
+                    }
+                });
             });
             
             // 發布頻率切換 - 台灣
@@ -749,6 +877,9 @@ class AICG_Admin_Settings {
             color: #23282d;
             border-bottom: 1px solid #ddd;
             padding-bottom: 10px;
+        }
+        #aicg-settings-messages {
+            margin-top: 20px;
         }
         </style>
         <?php
